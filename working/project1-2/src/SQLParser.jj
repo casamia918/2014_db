@@ -1,0 +1,749 @@
+/* SQLParser.jj : An SQL Parsing program */
+
+options {
+	STATIC = false;
+	ERROR_REPORTING = true;
+}
+
+PARSER_BEGIN(SQLParser)
+
+	import com.sleepycat.je.Environment;
+	import com.sleepycat.je.EnvironmentConfig;
+	import com.sleepycat.je.Database;
+	import com.sleepycat.je.DatabaseEntry;
+	import com.sleepycat.je.DatabaseConfig;
+	import com.sleepycat.je.DatabaseException;
+	
+	import java.io.File;
+	import java.util.List;
+
+	
+	class SQLParser {
+
+		public static final boolean NOT_READONLY = false;
+		public static final boolean READONLY = true;
+			
+		public static String myID = "SQL_*************> ";
+		
+		private static File myEnvPath = new File("./db");
+
+		private static DatabaseEntry theKey = new DatabaseEntry();
+		private static DatabaseEntry theData = new DatabaseEntry();
+	
+		private static MyEnv myEnv = new MyEnv(); 
+		
+		private static SQLParser myParser;
+		
+		public static void main (String[] args)  {
+			try {
+				myEnv.setup(myEnvPath, false);
+		    	
+		    	myParser = new SQLParser(System.in) ;
+		    	myParser.run();
+			} catch (Exception e) {
+				System.out.println(e.toString() );
+			} finally {
+				myEnv.close();
+			}
+		}
+		
+		public void run() throws Exception {
+			System.out.println(myID);
+			
+			try {
+				myParser.Command();
+			} catch (TokenMgrError tme) {
+				System.out.println("TokenMgrError"); // remove later
+				//System.out.println(tme.toString());  // remove later
+				//tme.printStackTrace(); // remove later
+				
+				myParser = new SQLParser(System.in);
+				myParser.run();
+			} catch (ParseException pe) {
+				System.out.println("ParseException"); // remove later
+				//System.out.println(pe.toString());  // remove later
+				//pe.printStackTrace(); // remove later
+				
+				myParser = new SQLParser(System.in);
+				myParser.run();	
+			} 
+		}
+		
+		
+		public void printMessage(String msg) {
+			System.out.println(myID + msg);
+		}
+		
+		
+		String thisTableName;
+		int primaryKeyOccur;
+	}
+
+PARSER_END(SQLParser)
+
+
+
+
+
+//**************************************************************************//
+//************************** regular expression ****************************//
+//**************************************************************************//
+
+TOKEN : { < UNDERSCORE : "_" > }
+TOKEN : { < LEFT_PAREN : "(" > }
+TOKEN : { < RIGHT_PAREN : ")" > }
+TOKEN : { < COMMA : "," > }
+TOKEN : { < SEMICOLON : ";" > }
+TOKEN : { < PERIOD : "." > }
+TOKEN : { < STAR : "*" > }
+TOKEN : { < QUOTE : "'" > }
+TOKEN : { < SIGN : ["+", "-"] > }
+TOKEN : { < COMP_OP : "<" | ">" | "=" | ">=" | "<=" | "!=" > }
+
+// Non-tokenized words.
+SKIP : { < SPACE : " " | "\t" | "\r" | "\n" | "\r\n"  > }
+
+TOKEN : { < #NON_QUOTE_SPECIAL_CHARACTER : ~["'", "\""] > }
+TOKEN : { < #DIGIT : ["0"-"9"] > }
+TOKEN : { < #ALPHABET : ["a"-"z", "A"-"Z"] > }
+TOKEN : { < #NON_QUOTE_CHARACTER : < DIGIT > | < ALPHABET > | < SPACE > | < NON_QUOTE_SPECIAL_CHARACTER > > }
+
+TOKEN : { < CHAR_STRING :  < QUOTE > (< NON_QUOTE_CHARACTER >)* < QUOTE > > }TOKEN : { < INT_VALUE : (< SIGN >)? < DIGIT > (< DIGIT >)* > }
+TOKEN : { < DATE_VALUE : < NNNN > "-" < NN > "-" < NN > > }
+TOKEN : { < #NNNN : < DIGIT >< DIGIT >< DIGIT >< DIGIT > > }
+TOKEN : { < #NN : < DIGIT >< DIGIT > > }
+
+// Reserve words
+// Some words are especially need to define with <SPACE> token 
+// to differentiate it from other tokens when other tokens are non-alphabet word. 
+TOKEN  : {
+  < SELECT : "select">
+| < FROM : "from" > 
+| < WHERE : "where" > 
+| < CREATE : "create" >
+| < TABLE : "table"> 
+| < IS : "is" > 
+| < NOT : <SPACE> "not" >
+| < AND : <SPACE> "and" <SPACE> > 
+| < OR : <SPACE> "or" <SPACE> > 
+| < INSERT : "insert" > 
+| < INTO : "into" > 
+| < DELETE : "delete" > 
+| < NULL : "null" >
+| < DESC : "desc" >
+| < DROP : "drop" >
+| < SHOW : "show" >
+| < TABLES : "tables" > 
+| < VALUES : <SPACE> "values" >
+| < AS : "as" >
+| < PRIMARY : "primary" > 
+| < FOREIGN : "foreign" >
+| < KEY : "key" >
+| < INT : "int" >
+| < CHAR : "char" >
+| < DATE : "date" >
+| < REFERENCES : <SPACE> "references" > 
+| < EXIT : "exit"  >
+}
+
+// Legal identifier regular expression.
+// Legal identifier is checked if it is reserve words while in token generation process.
+// Reserve words checking is worked by case insensitively, using String.toLowerCase() method.
+TOKEN :
+{	 
+	< LEGAL_IDENTIFIER : < ALPHABET > ( < ALPHABET > | < UNDERSCORE > )*>  
+	{
+		Token t = matchedToken;
+		String s = t.image.toLowerCase();
+		
+		String[] reserves = {
+			"select", 
+			"from", 
+			"where", 
+			"create", 
+			"table", 
+			"is", 
+			"not",
+			"and", 
+			"or", 
+			"insert", 
+			"into", 
+			"delete", 
+			"null", 
+			"desc", 
+			"drop", 
+			"show", 
+			"tables", 
+			"values", 
+			"as", 
+			"primary",  
+			"foreign", 
+			"key", 
+			"int", 
+			"char", 
+			"date", 
+			"references", 
+			"exit"
+		};
+
+		int i=0;
+		while(i<reserves.length) {
+			if( s.equals( reserves[i] ) ) {
+				throw new TokenMgrError();
+			}
+			i++;
+		}
+	}
+}
+
+
+
+
+//**************************************************************************//
+//************************** BNF production ********************************//
+//**************************************************************************//
+
+
+//******************* Query *******************//
+
+void Command() :
+{}
+{
+	LOOKAHEAD ( < EXIT > )
+	< EXIT > < SEMICOLON > 
+	|
+	QueryList()
+	< EXIT > < SEMICOLON >
+	
+	
+}
+
+void QueryList() :
+{}
+{
+	(	  TryQuery()
+	)+
+}
+
+void TryQuery() :
+{}
+{
+	try {
+	(
+		Query()
+	)
+	} catch (SQLException se) {
+		System.out.println("SQLException"); // remove later
+		System.out.println(se.toString());
+		se.printStackTrace(); // remove later
+	} catch (DatabaseException dbe) {
+		System.out.println("DatabaseException"); // remove later
+		System.err.println(dbe.toString());
+		dbe.printStackTrace();  // remove later
+	} 
+	
+}
+
+void Query() throws SQLException :
+{}
+{
+	(
+	CreateTable()
+	< SEMICOLON >	
+	{ 
+		myEnv.setDatabase(thisTableName, NOT_READONLY);
+		// input column definitions into thisTable
+		printMessage("'" + thisTableName + "' table is created"); 
+		myEnv.closeDb(thisTableName);
+	}
+	|
+	DropTable()
+	< SEMICOLON >	
+	{ printMessage("'" + thisTableName + "' table is dropped" ); }
+	|
+	ShowTables()
+	< SEMICOLON >	
+	|
+	Desc()
+	< SEMICOLON >	
+	|
+	Select()
+	< SEMICOLON >	
+	|
+	Insert()
+	< SEMICOLON >	
+	|
+	Delete()
+	< SEMICOLON >	
+	)
+	
+}
+
+
+
+
+//******************* Create table query *******************//
+
+void CreateTable() throws SQLException :
+{
+}
+{
+  < CREATE > < TABLE > 
+  thisTableName = TableName()
+  {
+  	List<String> tableNames = myEnv.getDatabaseNames();
+  	if( tableNames.contains(thisTableName) ) {
+  		throw new SQLException("Create table has failed: table with the same name already exists");
+  	}
+  	
+  	
+  }
+  
+  TableElementList()
+}
+
+String TableName() : 
+{}
+{
+	< LEGAL_IDENTIFIER >
+	{
+		return token.toString();		
+	}
+}
+
+void TableElementList() throws SQLException :
+{
+	primaryKeyOccur = 0;
+}{
+	< LEFT_PAREN > 
+  
+	TableElement()
+	(
+		< COMMA > TableElement()
+	)*
+  
+	< RIGHT_PAREN >
+  
+}
+
+void TableElement() throws SQLException :
+{} {
+ 	ColumnDefinition()
+	|
+	TableConstraintDefinition()
+}
+
+void ColumnDefinition() throws SQLException  :
+{
+	String colName; 
+}
+{
+	colName = ColumnName() 
+	DataType() (< NOT > < NULL >)?
+  
+	{
+  		// add DuplicateColumnDefError
+	}	 }
+
+
+String ColumnName() : 
+{}
+{
+	< LEGAL_IDENTIFIER >
+	{
+		return token.toString();		
+	}  
+}
+
+void DataType() throws SQLException :
+{
+	int charLen;
+}
+{
+	< INT >
+	|
+	< CHAR > 
+	< LEFT_PAREN >  
+	< INT_VALUE >
+	{ 
+		charLen = Integer.parseInt( token.toString() );
+		if ( charLen < 1 ) {
+			// CharLengthError
+			throw new SQLException("Char Length should be > 0");
+		} 
+	}
+	< RIGHT_PAREN >
+	|
+	< DATE >
+}
+
+
+
+void TableConstraintDefinition() :
+{}
+{
+	PrimaryKeyConstraint()
+	|
+	ReferentialConstraint()}
+
+void PrimaryKeyConstraint() :
+{
+	String pkCols;
+	String[] pkColsArr;
+}
+{
+	< PRIMARY > < KEY > 
+	pkCols = ColumnNameList()
+  
+	{
+		primaryKeyOccur++;
+		if(primaryKeyOccur>1){
+			// add DuplicatePrimaryKeyDefError
+		}
+		
+		pkColsArr = pkCols.split(" ");
+		
+		// add NonExistingColumnDefError
+		
+	}
+}
+
+void ReferentialConstraint() :
+{	
+	String refedCols;
+	String[] refedColsArr;
+	String refingCols;
+	String[] refingColsArr;
+	String refingTableName;
+}
+{
+	< FOREIGN > < KEY > 
+	refedCols = ColumnNameList() 
+	< REFERENCES > 
+	refingTableName = TableName() 
+	refingCols = ColumnNameList()
+	{
+  		refedColsArr = refedCols.split(" ");
+  		refingColsArr = refingCols.split(" ");
+  	
+	  	// add ReferenceTypeError
+	  	
+	  	// add ReferenceNonPrimaryKeyError
+	  	
+	  	// add ReferenceColumnExistenceError
+	  	
+	  	// add ReferenceTableExistenceError
+	  	
+	  	// add NonExistingColumnDefError
+ 	 }
+}
+
+String ColumnNameList() :
+{
+	String colNameList;
+}
+{
+	< LEFT_PAREN > 
+	ColumnName()
+	{
+		colNameList = ColumnName();
+	}
+	(
+		< COMMA > ColumnName()
+		{
+			colNameList.concat(" "+ColumnName()) ;
+		}
+	)*
+  
+	< RIGHT_PAREN >
+	{
+		return colNameList;
+	}
+  
+}
+
+
+
+
+
+
+//******************* Drop table, show tables, desc query *******************//
+
+void DropTable() :
+{}
+{
+	< DROP > < TABLE >
+	thisTableName = TableName()
+	{
+  	// add NoSuchTable
+  	
+  	// add DropReferencedTableError
+  	
+  	
+  	
+	}
+}
+
+void ShowTables() :
+{}
+{
+	< SHOW > < TABLES >
+	{
+		// show tables
+	}
+}
+
+void Desc() :
+{}
+{
+	< DESC >
+	TableName()
+	{
+		// Desc 
+		
+		
+	}
+}
+
+
+
+
+
+
+//******************* Select query *******************//
+
+void Select() :{}
+{
+	< SELECT >
+	SelectList()
+	TableExpression()
+}
+
+void SelectList() :
+{}
+{
+	< STAR >
+	|
+	SelectedColumn()
+	(
+	  < COMMA > SelectedColumn()	)*
+
+}
+void SelectedColumn() :
+{}
+{
+	ColumnReference()
+	(
+	  < AS >
+	  ColumnName()	)?
+
+}
+
+void ColumnReference() :
+{}
+{
+	(
+		LOOKAHEAD(TableName() < PERIOD >)
+		TableName()
+		< PERIOD >
+	)?
+		ColumnName()
+}
+
+
+void TableExpression() :
+{}
+{
+	FromClause()
+	(
+		WhereClause()	)?
+}
+
+void FromClause() :
+{}
+{
+	< FROM >
+	TableReferenceList()
+}
+
+void TableReferenceList() :
+{}
+{
+	ReferedTable()
+	(
+		< COMMA > ReferedTable()	)*
+}
+
+void ReferedTable() :
+{}
+{
+	TableName()
+	(
+  		< AS >
+    	TableName()	)?
+
+}
+
+void WhereClause() :
+{}
+{
+	< WHERE >
+	BooleanValueExpression() 
+}
+
+void BooleanValueExpression() :
+{}
+{
+	BooleanTerm()
+	(
+		< OR >
+		BooleanTerm()
+	)*
+}
+
+
+void BooleanTerm() :
+{}
+{
+    BooleanFactor()
+	(
+	< AND >
+	BooleanFactor()
+	)*
+}
+
+void BooleanFactor() :
+{}
+{
+    (< NOT >)? BooleanTest()
+}
+
+void BooleanTest() :
+{}
+{
+    Predicate()
+	|
+	ParenthesizedBooleanExpression()
+}
+
+void ParenthesizedBooleanExpression() :
+{}
+{
+	< LEFT_PAREN > 
+	
+	BooleanTerm()
+	(
+	< OR >
+	BooleanTerm()
+	)*
+
+	< RIGHT_PAREN >
+}
+
+void Predicate() :
+{}
+{
+	LOOKAHEAD( CompOperand() < COMP_OP > ) 
+    ComparisonPredicate()
+	|
+	NullPredicate()
+}
+
+void ComparisonPredicate() :
+{}
+{
+    CompOperand()
+    < COMP_OP >
+    CompOperand()
+}
+
+void CompOperand() :
+{}
+{
+    ComparableValue()
+	|
+	ColumnReference()
+}
+
+
+void ComparableValue () :
+{}
+{
+    < INT_VALUE >
+    |
+    < CHAR_STRING >
+    |
+    < DATE_VALUE >
+}
+
+void NullPredicate() :
+{}
+{
+	(
+	LOOKAHEAD( TableName() < PERIOD > )     TableName() < PERIOD >
+    )?
+    ColumnName()
+    NullOperation()
+}
+
+void NullOperation() :
+{}
+{
+    < IS >
+    ( < NOT > )?
+    < NULL >
+}
+
+
+//******************* Insert, Delete query *******************//
+
+void Insert() :
+{}
+{
+	< INSERT > < INTO >
+	TableName()
+	InsertColumnsAndSource()
+}
+
+void InsertColumnsAndSource() :
+{}
+{
+	(
+	ColumnNameList()
+	)?
+	ValueList()
+}
+
+void ValueList() :
+{}
+{
+	< VALUES >
+	<LEFT_PAREN> Value() 
+	(
+	<COMMA> Value()
+	)*
+	< RIGHT_PAREN >
+}
+
+void Value() :
+{}
+{
+	< NULL >
+	|
+	ComparableValue()
+}
+
+void Delete() :
+{}
+{
+	< DELETE > < FROM >
+	TableName()
+	(
+	WhereClause()
+	)?
+}
+
+
+    
+
+

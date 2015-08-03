@@ -1,0 +1,559 @@
+/* SQLParser.jj : An SQL Parsing program */
+
+options {
+	STATIC = false;
+}
+
+PARSER_BEGIN(SQLParser)
+
+	class SQLParser {
+	
+		public static String myID = "SQL_*********> ";
+		
+		public static void main (String[] args)  {
+		
+			try {
+			  	System.out.println(myID);
+		    	SQLParser parser = new SQLParser (System.in) ;
+		    	parser.Command();
+			}
+			catch(Exception e) {
+				System.out.println("Syntax Error");
+			}
+			
+		}
+	
+	}
+
+PARSER_END(SQLParser)
+
+
+
+
+
+//**************************************************************************//
+//************************** regular expression ****************************//
+//**************************************************************************//
+
+TOKEN : { < UNDERSCORE : "_" > }
+TOKEN : { < LEFT_PAREN : "(" > }
+TOKEN : { < RIGHT_PAREN : ")" > }
+TOKEN : { < COMMA : "," > }
+TOKEN : { < SEMICOLON : ";" > }
+TOKEN : { < PERIOD : "." > }
+TOKEN : { < STAR : "*" > }
+TOKEN : { < QUOTE : "'" > }
+TOKEN : { < SIGN : ["+", "-"] > }
+TOKEN : { < COMP_OP : "<" | ">" | "=" | ">=" | "<=" | "!=" > }
+
+// Non-tokenized words.
+SKIP : { < SPACE : " " | "\t" | "\r" | "\n" | "\r\n"  > }
+
+TOKEN : { < #NON_QUOTE_SPECIAL_CHARACTER : ~["'", "\""] > }
+TOKEN : { < #DIGIT : ["0"-"9"] > }
+TOKEN : { < #ALPHABET : ["a"-"z", "A"-"Z"] > }
+TOKEN : { < #NON_QUOTE_CHARACTER : < DIGIT > | < ALPHABET > | < SPACE > | < NON_QUOTE_SPECIAL_CHARACTER > > }
+
+TOKEN : { < CHAR_STRING :  < QUOTE > (< NON_QUOTE_CHARACTER >)* < QUOTE > > }TOKEN : { < INT_VALUE : (< SIGN >)? < DIGIT > (< DIGIT >)* > }
+TOKEN : { < DATE_VALUE : < NNNN > "-" < NN > "-" < NN > > }
+TOKEN : { < #NNNN : < DIGIT >< DIGIT >< DIGIT >< DIGIT > > }
+TOKEN : { < #NN : < DIGIT >< DIGIT > > }
+
+// Reserve words
+// Some words are especially need to define with <SPACE> token 
+// to differentiate it from other tokens when other tokens are non-alphabet word. 
+TOKEN  : {
+  < SELECT : "select">
+| < FROM : "from" > 
+| < WHERE : "where" > 
+| < CREATE : "create" >
+| < TABLE : "table"> 
+| < IS : "is" > 
+| < NOT : <SPACE> "not" >
+| < AND : <SPACE> "and" <SPACE> > 
+| < OR : <SPACE> "or" <SPACE> > 
+| < INSERT : "insert" > 
+| < INTO : "into" > 
+| < DELETE : "delete" > 
+| < NULL : "null" >
+| < DESC : "desc" >
+| < DROP : "drop" >
+| < SHOW : "show" >
+| < TABLES : "tables" > 
+| < VALUES : <SPACE> "values" >
+| < AS : "as" >
+| < PRIMARY : "primary" > 
+| < FOREIGN : "foreign" >
+| < KEY : "key" >
+| < INT : "int" >
+| < CHAR : "char" >
+| < DATE : "date" >
+| < REFERENCES : <SPACE> "references" > 
+| < EXIT : "exit"  >
+}
+
+// Legal identifier regular expression.
+// Legal identifier is checked if it is reserve words while in token generation process.
+// Reserve words checking is worked by case insensitively, using String.toLowerCase() method.
+TOKEN :
+{	 
+	< LEGAL_IDENTIFIER : < ALPHABET > ( < ALPHABET > | < UNDERSCORE > )*>  
+	{
+		Token t = matchedToken;
+		String s = t.image.toLowerCase();
+		
+		String[] reserves = {
+			"select", 
+			"from", 
+			"where", 
+			"create", 
+			"table", 
+			"is", 
+			"not",
+			"and", 
+			"or", 
+			"insert", 
+			"into", 
+			"delete", 
+			"null", 
+			"desc", 
+			"drop", 
+			"show", 
+			"tables", 
+			"values", 
+			"as", 
+			"primary",  
+			"foreign", 
+			"key", 
+			"int", 
+			"char", 
+			"date", 
+			"references", 
+			"exit"
+		};
+
+		int i=0;
+		while(i<reserves.length) {
+			if( s.equals( reserves[i] ) ) {
+				throw new TokenMgrError();
+			}
+			i++;
+		}
+	}
+}
+
+
+
+
+//**************************************************************************//
+//************************** BNF production ********************************//
+//**************************************************************************//
+
+
+//******************* Query *******************//
+
+void Command() :
+{
+}
+{
+	( QueryList() )?
+	< EXIT > < SEMICOLON >
+}
+
+void QueryList() :
+{
+	String queryName;
+}
+{
+	(	  queryName=Query()
+	  < SEMICOLON > 
+	  {
+	  	System.out.println( myID + '"'+ queryName + '"' + " requested" );
+	  }
+	)+
+}
+
+
+String Query()  :
+{
+	String type;
+}
+{
+	(		CreateTableQuery()
+		{ type = "create table" ; }
+		|
+		DropTableQuery()
+		{ type = "drop table" ; }
+		|
+		ShowTableQuery()
+		{ type = "show table" ; }
+		|
+		DescQuery()
+		{ type = "desc" ; }
+		|
+		SelectQuery()
+		{ type = "select" ; }
+		|
+		InsertQuery()
+		{ type = "insert" ; }
+		|
+		DeleteQuery()
+		{ type = "delete" ; }
+	)
+	{ return type; }
+}
+
+
+
+
+//******************* Create table query *******************//
+
+void CreateTableQuery() :
+{}
+{
+  < CREATE > < TABLE > TableName()
+  TableElementList()
+}
+
+void TableName() : 
+{}
+{
+	< LEGAL_IDENTIFIER >  
+}
+
+void ColumnName() : 
+{}
+{
+	< LEGAL_IDENTIFIER >  
+}
+
+void TableElementList() :
+{}{
+  < LEFT_PAREN > 
+  
+  TableElement()
+  (
+    < COMMA > TableElement()  )*
+  
+  < RIGHT_PAREN >
+}
+
+void TableElement() :
+{} {
+ 	ColumnDefinition()
+	|
+	TableConstraintDefinition()
+}
+
+void ColumnDefinition() :
+{}
+{
+  ColumnName() DataType() (< NOT > < NULL >)? }
+
+void TableConstraintDefinition() :
+{}
+{
+	PrimaryKeyConstraint()
+	|
+	ReferentialConstraint()}
+
+void PrimaryKeyConstraint() :
+{}
+{
+  < PRIMARY > < KEY > ColumnNameList()
+}
+
+void ReferentialConstraint() :
+{}
+{
+  < FOREIGN > < KEY > ColumnNameList() < REFERENCES > TableName() ColumnNameList()
+}
+
+void ColumnNameList() :
+{}
+{
+  < LEFT_PAREN > ColumnName()
+  (
+    < COMMA > ColumnName()  )*
+  
+  < RIGHT_PAREN >
+  
+}
+
+void DataType() :
+{}
+{
+	< INT >
+	|
+	< CHAR > <LEFT_PAREN>  <INT_VALUE > < RIGHT_PAREN >
+	|
+	< DATE >
+}
+
+
+
+
+
+//******************* Drop table, show tables, desc query *******************//
+
+void DropTableQuery() :
+{}
+{
+  < DROP > < TABLE >
+  TableName()}
+
+void ShowTableQuery() :
+{}
+{
+  < SHOW > < TABLES >
+}
+
+void DescQuery() :
+{}
+{
+  < DESC >
+  TableName()
+}
+
+
+
+
+
+
+//******************* Select query *******************//
+
+void SelectQuery() :{}
+{
+	< SELECT >
+	SelectList()
+	TableExpression()
+}
+
+void SelectList() :
+{}
+{
+	< STAR >
+	|
+	SelectedColumn()
+	(
+	  < COMMA > SelectedColumn()	)*
+
+}
+void SelectedColumn() :
+{}
+{
+	ColumnReference()
+	(
+	  < AS >
+	  ColumnName()	)?
+
+}
+
+void ColumnReference() :
+{}
+{
+	(
+	  LOOKAHEAD(TableName() < PERIOD >)
+	  TableName()
+	  < PERIOD >
+	)?
+	  ColumnName()
+}
+
+
+void TableExpression() :
+{}
+{
+  FromClause()
+  (
+    WhereClause()  )?
+}
+
+void FromClause() :
+{}
+{
+  < FROM >
+  TableReferenceList()
+}
+
+void TableReferenceList() :
+{}
+{
+  ReferedTable()
+  (
+    < COMMA > ReferedTable()  )*
+}
+
+void ReferedTable() :
+{}
+{
+  TableName()
+  (
+  	< AS >
+    TableName()  )?
+
+}
+
+void WhereClause() :
+{}
+{
+	< WHERE >
+	BooleanValueExpression() 
+}
+
+void BooleanValueExpression() :
+{}
+{
+	BooleanTerm()
+	(
+	< OR >
+	BooleanTerm()
+	)*
+}
+
+
+void BooleanTerm() :
+{}
+{
+    BooleanFactor()
+	(
+	< AND >
+	BooleanFactor()
+	)*
+}
+
+void BooleanFactor() :
+{}
+{
+    (< NOT >)? BooleanTest()
+}
+
+void BooleanTest() :
+{}
+{
+    Predicate()
+	|
+	ParenthesizedBooleanExpression()
+}
+
+void ParenthesizedBooleanExpression() :
+{}
+{
+	< LEFT_PAREN > 
+	
+	BooleanTerm()
+	(
+	< OR >
+	BooleanTerm()
+	)*
+
+	< RIGHT_PAREN >
+}
+
+void Predicate() :
+{}
+{
+	LOOKAHEAD( CompOperand() < COMP_OP > ) 
+    ComparisonPredicate()
+	|
+	NullPredicate()
+}
+
+void ComparisonPredicate() :
+{}
+{
+    CompOperand()
+    < COMP_OP >
+    CompOperand()
+}
+
+void CompOperand() :
+{}
+{
+    ComparableValue()
+	|
+	ColumnReference()
+}
+
+
+void ComparableValue () :
+{}
+{
+    < INT_VALUE >
+    |
+    < CHAR_STRING >
+    |
+    < DATE_VALUE >
+}
+
+void NullPredicate() :
+{}
+{
+	(
+	LOOKAHEAD( TableName() < PERIOD > )     TableName() < PERIOD >
+    )?
+    ColumnName()
+    NullOperation()
+}
+
+void NullOperation() :
+{}
+{
+    < IS >
+    ( < NOT > )?
+    < NULL >
+}
+
+
+//******************* Insert, Delete query *******************//
+
+void InsertQuery() :
+{}
+{
+	< INSERT > < INTO >
+	TableName()
+	InsertColumnsAndSource()
+}
+
+void InsertColumnsAndSource() :
+{}
+{
+	(
+	ColumnNameList()
+	)?
+	ValueList()
+}
+
+void ValueList() :
+{}
+{
+	< VALUES >
+	<LEFT_PAREN> Value() 
+	(
+	<COMMA> Value()
+	)*
+	< RIGHT_PAREN >
+}
+
+void Value() :
+{}
+{
+	< NULL >
+	|
+	ComparableValue()
+}
+
+void DeleteQuery() :
+{}
+{
+	< DELETE > < FROM >
+	TableName()
+	(
+	WhereClause()
+	)?
+}
+
+
+    
+
+

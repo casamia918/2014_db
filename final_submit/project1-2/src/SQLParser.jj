@@ -1,0 +1,1326 @@
+/* SQLParser.jj : An SQL Parsing program */
+
+
+
+///////////////* project1-2 new */////////////
+///////////////* project1-2 new */////////////
+///////////////* project1-2 new */////////////
+
+
+
+options {
+	STATIC = false;
+	ERROR_REPORTING = true;
+}
+
+PARSER_BEGIN(SQLParser)
+
+	import com.sleepycat.je.*;
+	
+	import java.io.File;
+	import java.util.*;
+	import java.util.Map.*;
+
+	
+	class SQLParser {
+
+		public static final boolean NOT_READONLY = false;
+		public static final boolean READONLY = true;
+		
+		public static final int COLNAME = 0;
+		public static final int DATATYPE = 1;
+		public static final int NULLITY = 2;
+		public static final int KEYTYPE = 3;
+		
+		public static final int FORCOL = 0;
+		public static final int REFEDTABLENAME = 1;
+		public static final int REFEDCOL = 2;
+		
+		//These prefix strings are attached to each database record key's head.
+		public static final String colDefPrefix = "@cd:";
+		public static final String forKeyPrefix = "#fk:";
+		public static final String refingPtPrefix = "!ref->:";
+		public static final String refedPtPrefix = "!ref<-:"; 
+			
+		public static String myID = "SQL_*********> ";
+		
+		private static File myEnvPath = new File("./db");
+
+		private static DatabaseEntry theKey = new DatabaseEntry();
+		private static DatabaseEntry theData = new DatabaseEntry();
+	
+		private static MyEnv myEnv = new MyEnv(); 
+		
+		private static SQLParser myParser;
+		
+		public static void main (String[] args)  {
+			try {
+				myEnv.setup(myEnvPath, false);
+				initiate();
+	    	} finally {
+				myEnv.close();
+			}
+		}
+		
+		public static void initiate() {
+			System.out.println(myID);
+			myParser = new SQLParser(System.in) ;
+	    	myParser.run();
+		}
+		
+		public void run() {
+			try {
+				myParser.Command();
+			} catch (TokenMgrError tme) {
+				System.out.println("SyntaxError");
+				
+				initiate();
+				
+			} catch (ParseException pe) {
+				System.out.println("SyntaxError");
+				
+				initiate();
+				
+			} catch (Exception e) {
+				System.out.println("UndefinedError");
+				
+				initiate();
+			}
+		}
+		
+		public static void printMessage(String msg) {
+			System.out.println(myID + msg);
+		}
+		
+		
+		
+		
+		
+
+
+		//********* column definition manipulation method *********//
+		//		
+		//    note : Every column definition related variables are handled by these methods.		
+		//
+		//    getter : getCol, getColInfo
+		//    modifier : modifyColInfo
+		//    setter : infoToCol, setColIntoHash
+		//
+		
+		//
+		
+		public String getCol(String colName) {
+			return colDefHash.get(colDefPrefix + colName);
+		}
+		
+		public String getColInfo(String col, int infoKind) {
+			String[] info = col.split(" ");
+			return info[infoKind];
+		}
+		
+		public String modifyColInfo(String col, int infoKind, String newInfo) {
+			String[] info = col.split(" ");
+            info[infoKind] = newInfo; // type check need
+            String newCol = info[0];
+            for(int i=1; i<4; i++){
+                    newCol = newCol.concat(" "+info[i]);
+            }
+            return newCol;
+		} 
+		
+		public String infoToCol(String colName, String dataType, String nullity, String keyType) {
+			return new String(colName +" " + dataType + " " + nullity + " " + keyType); 
+		}
+		
+		public void setColIntoHash(String col) {
+			String colName = getColInfo(col, COLNAME);
+			colDefHash.put(colDefPrefix + colName ,col);
+		}
+		
+		
+		
+		//********* foreign key manipulation method *********//
+		//
+		//    note : Every foreign key related variables are handled by these methods.
+		//			 Foreign keys are composed by 3 parts
+		//
+		//    getter : getForKey, getForColList, getRefedTableName, getRefedColList
+		//    setter : partoToForKey (to aggregate foreign key information into one string)						
+		//			   setForKeyIntoHash 
+		//							
+		//							forColList					 refedTableName  refedColList
+		//			 foreign key (<COLUMN_NAME_LIST>) referenced <TABLENAME> (<COLUMN_NAME_LIST>)
+		// 
+		// * for : foreign
+		// * col : column
+		// * refed : referenced
+		// * refing : referencing
+
+		public String getForKey(String fId) { // fId >= 1
+			return forKeyHash.get(forKeyPrefix+fId);
+		}
+		
+		private String getForKeyPart(String forKey, int Part) {
+			String[] forKeyArr = forKey.split(" ");
+			return forKeyArr[Part];
+		}
+		
+		public ArrayList<String> getForColList (String forKey) {
+			String forCol = getForKeyPart(forKey, FORCOL);
+			String[] forColArr = forCol.split(",");
+			return new ArrayList<String>(Arrays.asList(forColArr));
+		}
+		
+		public String getRefedTableName (String forKey) {
+			return getForKeyPart(forKey, REFEDTABLENAME);
+		}
+		
+		public ArrayList<String> getRefedColList (String forKey) {
+			String refedCol = getForKeyPart(forKey, REFEDCOL);
+			String[] refedColArr = refedCol.split(",");
+			return new ArrayList<String>(Arrays.asList(refedColArr));
+		}
+		
+		public String partToForKey (ArrayList<String> forColList, 
+									String refedTableName, 
+									ArrayList<String> refedColList ) {
+		
+			String forKey = new String();	
+			for(int i=0; i<forColList.size(); i++) {
+				forKey = forKey.concat(forColList.get(i) + ",");
+			}
+			forKey = forKey.substring(0, forKey.length()-1);
+			
+			forKey = forKey.concat(" " + refedTableName + " ");
+			
+			for(int i=0; i<refedColList.size(); i++) {
+				forKey =forKey.concat(refedColList.get(i) + ",");
+			}
+			forKey = forKey.substring(0, forKey.length()-1);
+			
+			return forKey;
+		}
+		
+		public void setForKeyIntoHash(int fId, String forKey) {
+			forKeyHash.put(forKeyPrefix+fId, forKey);
+		}
+		
+		
+		
+		//********* program global variable *********//
+		//			  
+		//	note : These variables are used globally in this program
+		//     
+		//	Hash variable : To store each kind of key/value sets.
+		//					Each kind's key are attached by discrimination prefix.
+		//	* refedPtHash (referenced pointing Hash)
+		//			: To store each table's referenced information, 
+		//			  this Hash is declared by 2 dimension Hash.
+		//
+		//
+		
+		
+		
+		
+		String thisTableName;
+		String refedTableName;
+		int primaryKeyOccur;
+		int forKeyOccur;
+		
+		HashMap<String, String> colDefHash; //key Prefix : @cd:
+		HashMap<String, String> forKeyHash; //key Prefix : #fk:
+		HashMap<String, String> refingPtHash; //key Prefix : !ref->:
+		HashMap<String, HashMap<String, String> > refedPtHash; //Prefix : !ref<-:
+															   //key1 : table name, 
+															   //key2 : refed Col name, value2 : refing col name 
+		
+		ArrayList<String> priColList; 
+		ArrayList<String> forColList;
+		
+		ArrayList<String> refedTableList;
+		ArrayList<String> refedColList;
+		
+	}
+
+PARSER_END(SQLParser)
+
+
+
+
+
+//**************************************************************************//
+//************************** regular expression ****************************//
+//**************************************************************************//
+
+TOKEN : { < UNDERSCORE : "_" > } 
+TOKEN : { < LEFT_PAREN : "(" > } 
+TOKEN : { < RIGHT_PAREN : ")" > }
+TOKEN : { < COMMA : "," > }
+TOKEN : { < SEMICOLON : ";" > }
+TOKEN : { < PERIOD : "." > }
+TOKEN : { < STAR : "*" > }
+TOKEN : { < QUOTE : "'" > }
+TOKEN : { < SIGN : ["+", "-"] > }
+TOKEN : { < COMP_OP : "<" | ">" | "=" | ">=" | "<=" | "!=" > }
+
+// Non-tokenized words.
+SKIP : { < SPACE : " " | "\t" | "\r" | "\n" | "\r\n"  > }
+
+TOKEN : { < #NON_QUOTE_SPECIAL_CHARACTER : ~["'", "\""] > }
+TOKEN : { < #DIGIT : ["0"-"9"] > }
+TOKEN : { < #ALPHABET : ["a"-"z", "A"-"Z"] > }
+TOKEN : { < #NON_QUOTE_CHARACTER : < DIGIT > | < ALPHABET > | < SPACE > | < NON_QUOTE_SPECIAL_CHARACTER > > }
+
+TOKEN : { < CHAR_STRING :  < QUOTE > (< NON_QUOTE_CHARACTER >)* < QUOTE > > }
+TOKEN : { < INT_VALUE : (< SIGN >)? < DIGIT > (< DIGIT >)* > }
+TOKEN : { < DATE_VALUE : < NNNN > "-" < NN > "-" < NN > > }
+TOKEN : { < #NNNN : < DIGIT >< DIGIT >< DIGIT >< DIGIT > > }
+TOKEN : { < #NN : < DIGIT >< DIGIT > > }
+
+// Reserve words
+// Some words are especially need to define with <SPACE> token 
+// to differentiate it from other tokens when other tokens are non-alphabet word. 
+TOKEN  : {
+  < SELECT : "select">
+| < FROM : "from" > 
+| < WHERE : "where" > 
+| < CREATE : "create" >
+| < TABLE : "table"> 
+| < IS : "is" > 
+| < NOT : <SPACE> "not" >
+| < AND : <SPACE> "and" <SPACE> > 
+| < OR : <SPACE> "or" <SPACE> > 
+| < INSERT : "insert" > 
+| < INTO : "into" > 
+| < DELETE : "delete" > 
+| < NULL : "null" >
+| < DESC : "desc" >
+| < DROP : "drop" >
+| < SHOW : "show" >
+| < TABLES : "tables" > 
+| < VALUES : <SPACE> "values" >
+| < AS : "as" >
+| < PRIMARY : "primary" > 
+| < FOREIGN : "foreign" >
+| < KEY : "key" >
+| < INT : "int" >
+| < CHAR : "char" >
+| < DATE : "date" >
+| < REFERENCES : <SPACE> "references" > 
+| < EXIT : "exit"  >
+}
+
+// Legal identifier regular expression.
+// Legal identifier is checked if it is reserve words while in token generation process.
+// Reserve words checking is worked by case insensitively, using String.toLowerCase() method.
+TOKEN :
+{	 
+	< LEGAL_IDENTIFIER : < ALPHABET > ( < ALPHABET > | < UNDERSCORE > )*>  
+	{
+		Token t = matchedToken;
+		String s = t.image.toLowerCase();
+		
+		String[] reserves = {
+			"select", 
+			"from", 
+			"where", 
+			"create", 
+			"table", 
+			"is", 
+			"not",
+			"and", 
+			"or", 
+			"insert", 
+			"into", 
+			"delete", 
+			"null", 
+			"desc", 
+			"drop", 
+			"show", 
+			"tables", 
+			"values", 
+			"as", 
+			"primary",  
+			"foreign", 
+			"key", 
+			"int", 
+			"char", 
+			"date", 
+			"references", 
+			"exit"
+		};
+
+		int i=0;
+		while(i<reserves.length) {
+			if( s.equals( reserves[i] ) ) {
+				throw new TokenMgrError();
+			}
+			i++;
+		}
+	}
+}
+
+
+
+
+//**************************************************************************//
+//************************** BNF production ********************************//
+//**************************************************************************//
+
+
+
+
+
+
+
+//******************* Query *******************//
+
+void Command() throws Exception  :
+{}
+{
+	LOOKAHEAD ( < EXIT > )
+	< EXIT > < SEMICOLON > 
+	|
+	QueryList()
+	< EXIT > < SEMICOLON >
+	
+	
+}
+
+void QueryList() throws Exception :
+{}
+{
+	(
+	  TryQuery()
+	  {
+	  	System.out.println(myID);
+	  }
+	)+
+}
+
+void TryQuery() throws Exception :
+{}
+{
+	try {
+	(
+		Query()
+	)
+	} catch (SQLException se) {
+		System.out.println(se.toString());
+	} catch (DatabaseException dbe) {
+		System.err.println(dbe.toString());
+	} 
+	
+}
+
+JAVACODE
+void write(Database db, String key, String data) throws Exception {
+	theKey = new DatabaseEntry(key.getBytes("UTF-8"));
+	theData = new DatabaseEntry(data.getBytes("UTF-8"));
+	db.put(null, theKey,theData);
+//	System.out.println("Write db complete, key: " + key + ", data: " + data ); // remove later
+}
+
+JAVACODE
+String read(Database db, String key) throws SQLException, Exception {
+	theKey = new DatabaseEntry(key.getBytes("UTF-8"));
+	theData = new DatabaseEntry();
+	String foundData; 
+	if( db.get(null,theKey,theData, LockMode.DEFAULT) == OperationStatus.SUCCESS ) {
+		foundData = new String(theData.getData(), "UTF-8");
+	} else {
+		throw new SQLException("No record found for key'" + key + "'");
+	}
+	
+//	System.out.println("read db complete, key: " + key + ", foundData: " + foundData ); // remove later
+	return foundData;	
+}
+
+//
+// Almost every javacode and database manipulation code are positioned 
+// upper method of the related method. But some are not. 
+//
+
+void Query() throws SQLException, Exception :
+{
+	Database thisTableDb;
+	List<String> tableNameList;
+}
+{
+	(
+	CreateTable()
+	< SEMICOLON >	
+	{ 
+		thisTableDb = myEnv.setDatabase(thisTableName, NOT_READONLY);
+		
+	 	try {
+            // colDefHash input, key Prefix : @cd:
+            Iterator<Entry<String,String> > colIt = colDefHash.entrySet().iterator();
+            while(colIt.hasNext() ){
+                Entry<String,String> nowEntry = colIt.next();
+                String nowKey = nowEntry.getKey();
+                String nowData = nowEntry.getValue();
+                write(thisTableDb, nowKey, nowData);
+            }
+
+            // forKeyHash input, key Prefix : #fk:
+            Iterator<Entry<String,String> > fkIt = forKeyHash.entrySet().iterator();
+            while(colIt.hasNext() ){
+                Entry<String,String> nowEntry = fkIt.next();
+                String nowKey = nowEntry.getKey();
+                String nowData = nowEntry.getValue();
+                write(thisTableDb, nowKey, nowData);
+            }
+            
+            // refingPtHash input, key Prefix : !ref->:
+            Iterator<Entry<String,String> > refingPtIt = refingPtHash.entrySet().iterator();
+            while(refingPtIt.hasNext() ){
+                Entry<String,String> nowEntry = refingPtIt.next();
+                String nowKey = nowEntry.getKey();
+                String nowData = nowEntry.getValue();
+                write(thisTableDb, nowKey, nowData);
+            }
+
+	    } finally {
+	            thisTableDb.close();
+	    }
+	    
+    	//WRITE REFERENCED POINTING HASH INTO EACH TABLES;
+    	//source : refedPtHash 
+	    	
+	    Iterator< Entry<String, HashMap<String, String> > > refedIt = refedPtHash.entrySet().iterator();
+            Database nowRefedDb;
+            while(refedIt.hasNext()) {
+            	Entry<String, HashMap<String, String> > nowEntry = refedIt.next();
+            	String nowRefedTableName = nowEntry.getKey();
+            	HashMap<String,String> nowRefedPtHash = nowEntry.getValue();
+            	
+            	try {
+            		 nowRefedDb = myEnv.getDb(nowRefedTableName, NOT_READONLY);
+            	} catch(DatabaseNotFoundException dbnfe) {
+            		throw new SQLException("Create table has failed: foreign key references non existing table"	);
+            	}
+            	
+            	try{
+            		
+            		Iterator<Entry<String,String> > refedIt2 = nowRefedPtHash.entrySet().iterator();
+                    while(refedIt2.hasNext() ){
+                        Entry<String,String> nowEntry2 = refedIt2.next();
+                        String nowKey = nowEntry2.getKey();
+                        String nowData = nowEntry2.getValue();
+                        write(nowRefedDb, nowKey, nowData);
+                    }
+            		
+            		
+            	} finally {
+            		nowRefedDb.close();
+            	}
+            
+            }
+
+		printMessage("'" + thisTableName + "' table is created");
+	}
+	|
+	DropTable()
+	< SEMICOLON >	
+	{	
+		/*
+		if( thisTableName.equals("all") ) { // remove later
+		
+			myEnv.removeDbAll();
+			printMessage("All table dropped");
+		
+		} else {
+		*/
+		
+		
+		
+		tableNameList = myEnv.getDatabaseNames();
+  		if( !tableNameList.contains(thisTableName) ) {
+  			throw new SQLException("No such table");
+  		} 
+  		
+    	thisTableDb = myEnv.setDatabase(thisTableName, NOT_READONLY);
+		
+	  	
+	  	// add DropReferencedTableError
+		
+		
+		
+		
+		
+		
+		myEnv.removeDb(thisTableName);		
+		printMessage("'" + thisTableName + "' table is dropped" );
+		 
+		//	}
+	}
+	|
+	ShowTables()
+	< SEMICOLON >
+	{
+		tableNameList = myEnv.getDatabaseNames();
+  		
+  		if(tableNameList.size()==0){
+  			throw new SQLException("There is no table");
+  		} else {
+  			System.out.println("------------------------");
+  			Iterator<String> it = tableNameList.iterator();
+  			while(it.hasNext()){
+  				System.out.println(it.next());
+  			}
+  			System.out.println("------------------------");
+  		}
+		
+	}	
+	|
+	Desc()
+	< SEMICOLON >
+	{
+    	tableNameList = myEnv.getDatabaseNames();
+  		if( !tableNameList.contains(thisTableName) ) {
+  			throw new SQLException("No Such Table");
+  		} 
+  		
+    	thisTableDb = myEnv.setDatabase(thisTableName, NOT_READONLY);
+	    Cursor thisDbCursor = thisTableDb.openCursor(null, null);
+        
+        try {
+	        theKey = new DatabaseEntry(colDefPrefix.getBytes("UTF-8") );
+	        theData= new DatabaseEntry();
+	
+			System.out.println("--------------------------------------------------");
+    		System.out.println("table_name [" + thisTableName +"]" );
+    		System.out.format("%-24s%-12s%-6s%-8s%n", "column_name", "type", "null", "key");
+		
+	    	OperationStatus retVal = thisDbCursor.getSearchKeyRange(theKey, theData, LockMode.DEFAULT); 
+	        if (retVal != OperationStatus.SUCCESS) {
+	        	throw new SQLException("No Column in the table");
+	        } else {
+	        
+		        while ( retVal == OperationStatus.SUCCESS ) {
+		        		
+		            String nowCol = new String(theData.getData(), "UTF-8");
+		
+		            String nowColName = getColInfo(nowCol, COLNAME);
+		            String nowColDataType = getColInfo(nowCol, DATATYPE);
+		            String nowColNullity = getColInfo(nowCol, NULLITY);
+		            String nowColKeyType = getColInfo(nowCol, KEYTYPE);
+		            if(nowColKeyType.equals("NOR")) {
+		            	nowColKeyType = "";
+		            }
+		            
+		        	System.out.format("%-24s", nowColName);
+		        	System.out.format("%-12s", nowColDataType);
+		        	System.out.format("%-6s", nowColNullity);
+		        	System.out.format("%-8s%n", nowColKeyType);
+		        	
+		        	retVal = thisDbCursor.getNext (theKey, theData, LockMode.DEFAULT); 
+		
+		        } 
+		        
+		        System.out.println("--------------------------------------------------");
+	        }
+		
+		} finally {
+        	thisDbCursor.close();
+        	thisTableDb.close();
+        }
+	}	
+	|
+	Select()
+	< SEMICOLON >	
+	|
+	Insert()
+	< SEMICOLON >	
+	|
+	Delete()
+	< SEMICOLON >	
+	)
+	
+}
+
+
+
+
+//******************* Create table query *******************//
+
+void CreateTable() throws SQLException, Exception :
+{
+}
+{
+  < CREATE > < TABLE > 
+  thisTableName = TableName()
+  {
+  	List<String> tableNameList = myEnv.getDatabaseNames();
+  	if( tableNameList.contains(thisTableName) ) {
+  		throw new SQLException("Create table has failed: table with the same name already exists");
+  	}
+  	
+  }
+  
+  TableElementList()
+}
+
+String TableName() : 
+{}
+{
+	< LEGAL_IDENTIFIER >
+	{
+		return token.toString();		
+	}
+}
+
+void TableElementList() throws SQLException, Exception :
+{
+	primaryKeyOccur = 0;
+	forKeyOccur = 0;
+	colDefHash = new HashMap<String, String>();
+	forKeyHash = new HashMap<String, String>();
+	refingPtHash = new HashMap<String, String>();
+	refedPtHash = new HashMap<String, HashMap<String, String> >(); 
+	ArrayList<String> priColList = new ArrayList<String>();
+	ArrayList<String> forColList = new ArrayList<String>();
+	ArrayList<String> refedColList = new ArrayList<String>();
+}
+{
+	< LEFT_PAREN > 
+  
+	TableElement()
+	(
+		< COMMA > 
+		TableElement()
+	)*
+  
+	< RIGHT_PAREN >
+  
+}
+
+void TableElement() throws SQLException, Exception :
+{} 
+{
+ 	ColumnDefinition()
+	|
+	TableConstraintDefinition()
+}
+
+void ColumnDefinition() throws SQLException  :
+{
+	String col;
+	String colName; 
+	String dt;
+	String nullable = "Y";
+	String key = "NOR";
+}
+{
+	colName = ColumnName() 
+	dt = DataType() 
+	( nullable = NotNull() )?
+  
+	{
+		if( colDefHash.containsKey(colDefPrefix + colName) ) {
+			throw new SQLException("Create table has failed: column definition is duplicated");
+		}
+		col = infoToCol(colName,dt,nullable,key);
+		setColIntoHash(col);
+	}	 
+}
+
+String NotNull() :
+{}
+{
+	< NOT > < NULL >
+	{ return "N"; } 
+}
+
+String ColumnName() : 
+{}
+{
+	< LEGAL_IDENTIFIER >
+	{
+		return token.toString();		
+	}  
+}
+
+String DataType() throws SQLException :
+{
+	int charLen;
+}
+{
+	< INT >
+	{ return "int"; }
+	|
+	< CHAR > 
+	< LEFT_PAREN >  
+	< INT_VALUE >
+	{ 
+		charLen = Integer.parseInt( token.toString() );
+		if ( charLen < 1 ) {
+			throw new SQLException("Char Length should be > 0");
+		} 
+	}
+	< RIGHT_PAREN >
+	{ return new String("char("+charLen+")"); }
+	|
+	< DATE >
+	{ return "date"; }
+}
+
+
+
+void TableConstraintDefinition() throws SQLException, Exception :
+{}
+{
+	PrimaryKeyConstraint()
+	|
+	ReferentialConstraint()
+}
+
+void PrimaryKeyConstraint() throws SQLException :
+{
+	
+}
+{
+	< PRIMARY > < KEY > 
+	priColList = ColumnNameList()
+  
+	{
+		primaryKeyOccur++;
+		if(primaryKeyOccur>1){
+			throw new SQLException("Create table has failed: primary key definition is duplicated");
+		}
+		
+		Iterator<String> it = priColList.iterator();
+		while(it.hasNext()) {
+			String priColName = it.next();
+			if( !colDefHash.containsKey(colDefPrefix + priColName) ) {
+				throw new SQLException("Create table has failed: '"+priColName+"' does not exists in column definition"); 
+			}
+		}
+		
+		Iterator<String> it2 = priColList.iterator();
+		while(it2.hasNext()) {
+			String priColName = it2.next();
+			String col = getCol(priColName);
+			
+			String kt = getColInfo(col, KEYTYPE);
+			if(kt.equals("FOR") ) {
+				col = modifyColInfo(col, KEYTYPE, "PRI/FOR");
+			} else if (kt.equals("NOR") ) {
+				col = modifyColInfo(col, KEYTYPE, "PRI");
+			}
+			
+			col = modifyColInfo(col, NULLITY, "N");
+			setColIntoHash(col);
+		}
+	}
+	
+}
+
+void ReferentialConstraint() throws SQLException, Exception :
+{	
+	Database refedDb;	
+	OperationStatus retVal;
+	ArrayList<String> forColDataTypeArr = new ArrayList<String>();
+	ArrayList<String> refedColDefList = new ArrayList<String>();
+	ArrayList<String> refedColDataTypeArr = new ArrayList<String>();
+	
+	HashMap<String, String> thisFKRefedPtHash = new HashMap<String,String>();
+}
+{
+	< FOREIGN > < KEY > 
+	forColList = ColumnNameList() 
+	< REFERENCES > 
+	refedTableName = TableName() 
+	refedColList = ColumnNameList()
+	
+	{
+	
+		if( forColList.size() != refedColList.size() ) {
+			throw new SQLException("Reference Column size Error");
+		}
+		
+		if( thisTableName.equals(refedTableName) ) {
+			throw new SQLException("Self referencing error");
+		}
+		
+		// consume foreign column data type
+		Iterator<String> it1 = forColList.iterator();
+		while(it1.hasNext() ) {
+			String nowForColName = it1.next();
+			if ( colDefHash.containsKey(colDefPrefix + nowForColName) ) {
+				String nowForCol = getCol(nowForColName);
+				String nowColDt = getColInfo(nowForCol, DATATYPE);
+				forColDataTypeArr.add(nowColDt);
+			} else {
+				throw new SQLException("Create table has failed: '"+nowForColName+"' does not exists in column definition");
+			}
+			
+		}
+		
+		
+		
+		// open referenced database
+	  	try{ 
+			refedDb = myEnv.getDb(refedTableName, READONLY);
+		} catch (DatabaseNotFoundException dbnfe) {
+			throw new SQLException("Create table has failed: foreign key references non existing table");
+		}
+		
+		 	
+		try { 
+			// read referenced column from refedDb
+			Iterator<String> refIt = refedColList.iterator();
+			while(refIt.hasNext()) {
+				String nowRefColName =  refIt.next() ;
+
+				System.out.println("colDefPrefix+nowRefColName : " + colDefPrefix+nowRefColName) ; // remove later
+				theKey = new DatabaseEntry( (colDefPrefix+nowRefColName).getBytes("UTF-8") );
+				theData = new DatabaseEntry();
+				
+				retVal = refedDb.get(null, theKey, theData, LockMode.DEFAULT);
+			
+				if(retVal == OperationStatus.SUCCESS) {
+					refedColDefList.add( new String(theData.getData(), "UTF-8") );
+				} else {
+					throw new SQLException("Create table has failed: foreign key references non existing column");
+				}
+			}
+		} finally {				
+			refedDb.close();
+		}
+		
+		
+		
+		// check reference constraint
+		Iterator<String> it2 = refedColDefList.iterator();
+		int count=-1;
+		while(it2.hasNext() ) {
+			String refedCol= it2.next();
+			count++;
+			String refedColDt = getColInfo(refedCol, DATATYPE);
+			if( !refedColDt.equals( forColDataTypeArr.get(count) ) ) {
+				throw new SQLException("Reference Type Error");
+			}
+			
+			String refedColKt = getColInfo(refedCol, KEYTYPE);
+			if(!refedColKt.equals("PRI") && !refedColKt.equals("PRI/FOR") ) {
+				throw new SQLException("Reference Non PrimaryKey Error");
+			} 
+		}
+
+
+        // setup reference relationship
+        // 1) forKeyHash 2) update colDefHash's KeyType info 3) refingPtHash 4) refedPtHash in refedTable 
+        // folColList(i) -> refedColList(i)
+
+        // 1) input into forKeyHash
+
+		forKeyOccur++;
+		String fkKey = new String(forKeyPrefix + forKeyOccur);
+		String fkValue = partToForKey(forColList, refedTableName, refedColList);
+		forKeyHash.put(fkKey, fkValue);
+		
+ 
+        for(int i=0; i<forColList.size(); i++ ) {
+			String nowRefingColName = forColList.get(i) ;
+            String nowRefedColName = refedColList.get(i);
+
+            // 2) update colDefHash's KeyType info
+            
+            String refingColDef = getCol(nowRefingColName);
+            
+            String kt = getColInfo(refingColDef, KEYTYPE);
+            if(kt.equals("PRI") ) {
+				refingColDef = modifyColInfo(refingColDef, KEYTYPE, "PRI/FOR");
+			} else if (kt.equals("NOR") ) {
+				refingColDef = modifyColInfo(refingColDef, KEYTYPE, "FOR");
+			}
+			setColIntoHash(refingColDef);
+
+            // 3) refingPtHash  
+            // this hash must write into thisTableDb in create method
+
+            String refingPtKey = new String(refingPtPrefix + nowRefingColName);
+            String refingPtValue = new String(refedTableName + " " + nowRefedColName );
+            refingPtHash.put(refingPtKey, refingPtValue);
+			
+			//4) refedPtHash
+			// this hash must write into refedTableDb in create method
+            String refedPtKey = new String(refedPtPrefix + nowRefedColName);
+            String refedPtValue = new String(thisTableName + " " + nowRefingColName );
+            thisFKRefedPtHash.put(refedPtKey, refedPtValue);
+        }
+        
+        refedPtHash.put(refedTableName, thisFKRefedPtHash);
+	  	
+ 	 }
+}
+
+ArrayList<String> ColumnNameList() :
+{
+	ArrayList<String> colNameList = new ArrayList<String>();
+	String colName;
+}
+{
+	< LEFT_PAREN > 
+	colName = ColumnName()
+	{
+		colNameList.add(colName);
+	}
+	(
+		< COMMA > 
+		colName = ColumnName()
+		{
+			colNameList.add(colName);
+		}
+	)*
+  
+	< RIGHT_PAREN >
+	{
+		return colNameList;
+	}
+  
+}
+
+
+
+
+
+
+//******************* Drop table, show tables, desc query *******************//
+
+void DropTable() :
+{}
+{
+	< DROP > < TABLE >
+	thisTableName = TableName()
+}
+
+void ShowTables() :
+{}
+{
+	< SHOW > < TABLES >
+}
+
+void Desc() :
+{}
+{
+	< DESC >
+	thisTableName = TableName()
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//******************* Select query *******************//
+
+void Select() :
+{}
+{
+	< SELECT >
+	SelectList()
+	TableExpression()
+}
+
+void SelectList() :
+{}
+{
+	< STAR >
+	|
+	SelectedColumn()
+	(
+	  < COMMA > SelectedColumn()
+	)*
+
+}
+void SelectedColumn() :
+{}
+{
+	ColumnReference()
+	(
+	  < AS >
+	  ColumnName()
+	)?
+
+}
+
+void ColumnReference() :
+{}
+{
+	(
+		LOOKAHEAD(TableName() < PERIOD >)
+		TableName()
+		< PERIOD >
+	)?
+		ColumnName()
+}
+
+
+void TableExpression() :
+{}
+{
+	FromClause()
+	(
+		WhereClause()
+	)?
+}
+
+void FromClause() :
+{}
+{
+	< FROM >
+	TableReferenceList()
+}
+
+void TableReferenceList() :
+{}
+{
+	ReferedTable()
+	(
+		< COMMA > ReferedTable()
+	)*
+}
+
+void ReferedTable() :
+{}
+{
+	TableName()
+	(
+  		< AS >
+    	TableName()
+	)?
+
+}
+
+void WhereClause() :
+{}
+{
+	< WHERE >
+	BooleanValueExpression() 
+}
+
+void BooleanValueExpression() :
+{}
+{
+	BooleanTerm()
+	(
+		< OR >
+		BooleanTerm()
+	)*
+}
+
+
+void BooleanTerm() :
+{}
+{
+    BooleanFactor()
+	(
+	< AND >
+	BooleanFactor()
+	)*
+}
+
+void BooleanFactor() :
+{}
+{
+    (< NOT >)? BooleanTest()
+}
+
+void BooleanTest() :
+{}
+{
+    Predicate()
+	|
+	ParenthesizedBooleanExpression()
+}
+
+void ParenthesizedBooleanExpression() :
+{}
+{
+	< LEFT_PAREN > 
+	
+	BooleanTerm()
+	(
+	< OR >
+	BooleanTerm()
+	)*
+
+	< RIGHT_PAREN >
+}
+
+void Predicate() :
+{}
+{
+	LOOKAHEAD( CompOperand() < COMP_OP > ) 
+    ComparisonPredicate()
+	|
+	NullPredicate()
+}
+
+void ComparisonPredicate() :
+{}
+{
+    CompOperand()
+    < COMP_OP >
+    CompOperand()
+}
+
+void CompOperand() :
+{}
+{
+    ComparableValue()
+	|
+	ColumnReference()
+}
+
+
+void ComparableValue () :
+{}
+{
+    < INT_VALUE >
+    |
+    < CHAR_STRING >
+    |
+    < DATE_VALUE >
+}
+
+void NullPredicate() :
+{}
+{
+	(
+	LOOKAHEAD( TableName() < PERIOD > ) 
+    TableName() < PERIOD >
+    )?
+    ColumnName()
+    NullOperation()
+}
+
+void NullOperation() :
+{}
+{
+    < IS >
+    ( < NOT > )?
+    < NULL >
+}
+
+
+//******************* Insert, Delete query *******************//
+
+void Insert() :
+{}
+{
+	< INSERT > < INTO >
+	TableName()
+	InsertColumnsAndSource()
+}
+
+void InsertColumnsAndSource() :
+{}
+{
+	(
+	ColumnNameList()
+	)?
+	ValueList()
+}
+
+void ValueList() :
+{}
+{
+	< VALUES >
+	<LEFT_PAREN> Value() 
+	(
+	<COMMA> Value()
+	)*
+	< RIGHT_PAREN >
+}
+
+void Value() :
+{}
+{
+	< NULL >
+	|
+	ComparableValue()
+}
+
+void Delete() :
+{}
+{
+	< DELETE > < FROM >
+	TableName()
+	(
+	WhereClause()
+	)?
+}
+
+
+
+  
+  
+
+
